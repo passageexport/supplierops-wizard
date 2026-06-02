@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SupplierOps — Guided Setup</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet"/>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{height:100%;font-family:'DM Sans',system-ui,sans-serif}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:#1C2B3A;border-radius:3px}
+textarea{outline:none;font-family:inherit}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+const NAV="#1C2B3A",OCEAN="#00A3B4",GOLD="#E07B00",SAND="#F5F0E6",WHITE="#FFFFFF",MUTED="#6B7A8D",BORDER="#E4DDD3";
+const SYSTEM_PROMPT = `You are the SupplierOps onboarding wizard, built by Passage Export Group for Mauritian food manufacturers. Your job is to have a warm, patient conversation with a business owner and turn what they know about their business into a structured manufacturing model.
+
+# YOUR PERSONA
+- Warm, encouraging, patient. You make the owner feel capable, never judged.
+- You explain WHY each question matters, in plain language.
+- You NEVER use accounting jargon without translating it. Never say "ABC costing", "activity driver", "cost pool" without explaining in everyday words.
+- You ask ONE thing at a time. Keep responses short — two to four sentences.
+- You use the owner's own product names back to them.
+
+# SIX PHASES (do not announce phase numbers)
+## Phase 1 — Business Profile: business name, what food they make, how they produce. Warm-up.
+## Phase 2 — Products: ONE AT A TIME. Name, typical batch size, export/local/both. Suggest a short code (Dholl Puri to DP) and confirm.
+## Phase 3 — Ingredients & Seasonality: what goes in each product and how much per batch. Build a shared ingredient list. For each: unit bought in, rough price, and YIELD (is all of it usable or is some lost to peeling/trimming/moisture). For Mauritius-seasonal ingredients (choko/chouchou, tomatoes, onions, brinjal, local seafood) proactively ask if the price changes through the year. If yes, capture stable price + months, peak price + months. The two periods must cover all 12 months.
+## Phase 4 — Costs (MATURITY ASSESSMENT): sense how much they know. Don't make it a test. Ask labour (people per batch, how long), then shared monthly costs (gas, electricity, rent), then whether a cost like gas is used for all products or only some. Listen to how confidently they answer. "I'm not sure" is fine — never push them to invent numbers.
+## Phase 5 — Pricing: current selling price per product, target margin (explain with their numbers), and the lowest margin they'd accept in a tough month (the floor).
+## Phase 6 — Domestic Retail (ONLY if they sell to local supermarkets): shelf space fees and year-end rebate (RFA/ristourne). Skip entirely if export-only or direct sales.
+
+# MATURITY LEVEL — INFER, EXPLAIN, CONFIRM (NEVER ASK DIRECTLY)
+- LEVEL 1 (recipe costing): products, recipes, quantities, rough prices, selling prices — but NOT confident on labour time, overheads, or cost-to-product links.
+- LEVEL 2 (yield tracking): Level 1 PLUS batch output, rejects/waste sense, rough labour estimates — but cannot allocate overheads to products.
+- LEVEL 3 (full costing): Level 2 PLUS labour standards per product, monthly overhead figures, AND confidently connects costs to products.
+Explain the level as a PATHWAY not a grade: "Based on what you've shared, the best starting setup is recipe costing with yield tracking. As you record batches, it builds the data to unlock fuller cost analysis later. Does that sound right?" Then CONFIRM.
+
+# COMPLETION
+After the owner confirms, give a short warm plain-language summary. Then on a new line output the configuration as JSON wrapped EXACTLY in:
+===CONFIG_START===
+{ ...JSON... }
+===CONFIG_END===
+
+JSON structure:
+{
+  "schema_version":"1.0",
+  "organisation":{"name":str,"country":"MU","business_type":"manufacturer"|"processor"|"artisan","maturity_level":1|2|3},
+  "facilities":[{"name":str,"type":"production"|"cold_storage"|"dry_storage"|"co_manufacturer"|"mixed","location":str,"is_primary":true}],
+  "products":[{"code":str,"name":str,"batch_size":num,"unit":str,"channels":["export"|"domestic"]}],
+  "ingredients":[{"code":str,"name":str,"unit":str,"ingredient_yield":num,"category":"raw_material"|"packaging"|"consumable","seasonal":bool,"stable_price":num|null,"peak_price":num|null,"stable_months":[int],"peak_months":[int]}],
+  "recipes":[{"product_code":str,"version_number":1,"lines":[{"ingredient_code":str,"qty_per_batch":num,"unit":str}]}],
+  "cost_pools":[{"name":str,"category":"direct"|"activity"|"overhead","monthly_amount":num,"driver":"output"|"machine_hours"|"storage_volume"|"revenue"|"labour_hours","assigned_product_codes":[str]}],
+  "labour_rates":[{"role":str,"rate_per_hour":num,"standards":[{"product_code":str,"standard_hours_per_batch":num}]}],
+  "pricing_configs":[{"product_code":str,"channel":"export"|"domestic","target_margin":num,"monthly_floor":num,"current_selling_price":num,"inland_transport":num,"review_trigger_days":90,"review_trigger_pct":0.05}],
+  "retail_commitments":[{"product_code":str,"retailer_name":str,"shelf_space_fee_annual":num,"rfa_percentage":num,"projected_annual_volume":num}]
+}
+Rules: Level 1 cost_pools+labour_rates may be empty. Level 2 include labour_rates. Level 3 include both. One primary facility named after the business if not named. Seasonal: stable_months+peak_months total 12. Non-seasonal: stable_months all 12, peak_months [], peak_price null. Months 0-indexed (0=Jan). retail_commitments empty unless domestic supermarket sales. Do not output JSON until the user confirms.
+
+Begin now with a warm welcome and your first question. Keep it short.`;
+
+function App(){
+  const [messages,setMessages]=useState([]);
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [config,setConfig]=useState(null);
+  const [started,setStarted]=useState(false);
+  const scrollRef=useRef(null);
+  useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;},[messages,loading]);
+  const callClaude=async(history)=>{
+    const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:SYSTEM_PROMPT,messages:history})});
+    const data=await res.json();
+    return data.content.filter(b=>b.type==="text").map(b=>b.text).join("");
+  };
+  const extractConfig=t=>{const m=t.match(/===CONFIG_START===\s*([\s\S]*?)\s*===CONFIG_END===/);if(!m)return null;try{return JSON.parse(m[1].trim());}catch{return null;}};
+  const stripConfig=t=>t.replace(/===CONFIG_START===[\s\S]*?===CONFIG_END===/,"").trim();
+  const start=async()=>{setStarted(true);setLoading(true);try{const r=await callClaude([{role:"user",content:"Hello, I'm ready to start."}]);setMessages([{role:"assistant",content:r}]);}catch(e){setMessages([{role:"assistant",content:"I had trouble connecting. Please try again."}]);}setLoading(false);};
+  const send=async()=>{if(!input.trim()||loading)return;const nm=[...messages,{role:"user",content:input.trim()}];setMessages(nm);setInput("");setLoading(true);try{const r=await callClaude(nm.map(m=>({role:m.role,content:m.content})));const cfg=extractConfig(r);const disp=stripConfig(r);setMessages([...nm,{role:"assistant",content:disp||"All done — your configuration is ready below."}]);if(cfg)setConfig(cfg);}catch(e){setMessages([...nm,{role:"assistant",content:"I had trouble connecting. Please try again."}]);}setLoading(false);};
+  const levelLabel=l=>({1:"Recipe Costing",2:"Yield Tracking",3:"Full Costing"}[l]||"-");
+  const bubble=role=>({maxWidth:"85%",padding:"11px 15px",borderRadius:role==="user"?"14px 14px 3px 14px":"14px 14px 14px 3px",background:role==="user"?NAV:WHITE,color:role==="user"?WHITE:NAV,fontSize:15,lineHeight:1.55,border:role==="user"?"none":"1px solid "+BORDER,whiteSpace:"pre-wrap"});
+  const code={fontFamily:"monospace",fontSize:11,background:SAND,padding:"1px 5px",borderRadius:3};
+  const cfgCard={border:"1px solid "+BORDER,borderRadius:8,padding:14,marginBottom:12};
+  const cfgH={fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",color:MUTED,marginBottom:10};
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%",background:SAND,color:NAV}}>
+      <div style={{background:NAV,padding:"16px 20px",flexShrink:0}}>
+        <div style={{fontSize:10,letterSpacing:2,textTransform:"uppercase",color:OCEAN,fontWeight:700,marginBottom:3}}>Passage · SupplierOps</div>
+        <div style={{fontSize:15,color:SAND,fontWeight:600}}>Guided Setup</div>
+      </div>
+      {!started?(
+        <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center",padding:"32px"}}>
+          <div style={{fontSize:12,letterSpacing:2,textTransform:"uppercase",color:OCEAN,fontWeight:700,marginBottom:14}}>Welcome</div>
+          <h1 style={{fontSize:24,fontWeight:700,color:NAV,marginBottom:14,maxWidth:440,lineHeight:1.3}}>Let's set up your business — one conversation, no forms.</h1>
+          <p style={{fontSize:15,color:MUTED,maxWidth:420,lineHeight:1.6,marginBottom:26}}>I'll ask about your products, your ingredients, and your costs. There are no wrong answers — if you don't know a number, just say so.</p>
+          <button onClick={start} style={{padding:"13px 32px",borderRadius:10,border:"none",background:NAV,color:WHITE,fontSize:15,fontWeight:700,cursor:"pointer"}}>Begin Setup</button>
+        </div>
+      ):(
+        <>
+          <div ref={scrollRef} style={{flex:1,overflow:"auto",padding:"20px"}}>
+            {messages.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:14}}><div style={bubble(m.role)}>{m.content}</div></div>))}
+            {loading&&(<div style={{display:"flex",justifyContent:"flex-start",marginBottom:14}}><div style={{...bubble("assistant"),color:MUTED}}>Thinking…</div></div>)}
+            {config&&(
+              <div style={{marginTop:20,background:WHITE,borderRadius:10,padding:18,border:"1px solid "+BORDER}}>
+                <div style={{fontSize:13,fontWeight:700,color:NAV,marginBottom:4}}>Configuration Captured</div>
+                <div style={{fontSize:12,color:MUTED,marginBottom:16}}>This is what your tool will be set up with.</div>
+                <div style={cfgCard}><div style={cfgH}>Business</div><div style={{fontSize:14,fontWeight:600}}>{config.organisation?.name}</div><div style={{fontSize:12,color:MUTED,marginTop:4}}>Starting level: <strong style={{color:GOLD}}>{levelLabel(config.organisation?.maturity_level)}</strong> (Level {config.organisation?.maturity_level})</div></div>
+                {config.products?.length>0&&(<div style={cfgCard}><div style={cfgH}>Products ({config.products.length})</div>{config.products.map((p,i)=>(<div key={i} style={{marginBottom:8}}><span style={code}>{p.code}</span> <strong style={{fontSize:13}}>{p.name}</strong><div style={{fontSize:11,color:MUTED,marginTop:2}}>Batch: {p.batch_size} {p.unit} · {p.channels?.join(", ")}</div></div>))}</div>)}
+                {config.ingredients?.length>0&&(<div style={cfgCard}><div style={cfgH}>Ingredients ({config.ingredients.length})</div>{config.ingredients.map((g,i)=>(<div key={i} style={{marginBottom:6,fontSize:12}}><span style={code}>{g.code}</span> {g.name}{g.seasonal&&<span style={{padding:"1px 7px",borderRadius:100,fontSize:10,fontWeight:600,background:"#FEF3C7",color:"#92400E",marginLeft:6}}>Seasonal</span>}<span style={{color:MUTED}}> · yield {Math.round(g.ingredient_yield*100)}%</span></div>))}</div>)}
+                {config.recipes?.length>0&&(<div style={cfgCard}><div style={cfgH}>Recipes ({config.recipes.length})</div>{config.recipes.map((r,i)=>(<div key={i} style={{marginBottom:8,fontSize:12}}><strong>{r.product_code}</strong>: {r.lines?.map(l=>l.qty_per_batch+l.unit+" "+l.ingredient_code).join(", ")}</div>))}</div>)}
+                {config.cost_pools?.length>0&&(<div style={cfgCard}><div style={cfgH}>Cost Pools ({config.cost_pools.length})</div>{config.cost_pools.map((c,i)=>(<div key={i} style={{marginBottom:6,fontSize:12}}><strong>{c.name}</strong> — MUR {c.monthly_amount?.toLocaleString()}/mo<div style={{color:MUTED,fontSize:11}}>{c.driver} · {c.assigned_product_codes?.join(", ")}</div></div>))}</div>)}
+                {config.labour_rates?.length>0&&(<div style={cfgCard}><div style={cfgH}>Labour ({config.labour_rates.length})</div>{config.labour_rates.map((l,i)=>(<div key={i} style={{marginBottom:4,fontSize:12}}><strong>{l.role}</strong> — MUR {l.rate_per_hour}/hr</div>))}</div>)}
+                {config.pricing_configs?.length>0&&(<div style={cfgCard}><div style={cfgH}>Pricing ({config.pricing_configs.length})</div>{config.pricing_configs.map((p,i)=>(<div key={i} style={{marginBottom:4,fontSize:12}}><strong>{p.product_code}</strong> ({p.channel}): MUR {p.current_selling_price} · target {Math.round(p.target_margin*100)}%</div>))}</div>)}
+                <button style={{width:"100%",padding:"12px",borderRadius:8,border:"none",background:GOLD,color:WHITE,fontSize:14,fontWeight:700,cursor:"pointer"}}>Confirm & Open SupplierOps →</button>
+                <div style={{fontSize:11,color:MUTED,textAlign:"center",marginTop:8}}>On the live platform this saves your setup and opens your tool.</div>
+              </div>
+            )}
+          </div>
+          <div style={{padding:"14px 20px",borderTop:"1px solid "+BORDER,background:WHITE,flexShrink:0,display:"flex",gap:10}}>
+            <textarea style={{flex:1,padding:"11px 15px",borderRadius:10,border:"1px solid "+BORDER,fontSize:15,color:NAV,resize:"none",maxHeight:120}} placeholder="Type your answer…" value={input} rows={1} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}} disabled={loading}/>
+            <button onClick={send} disabled={loading||!input.trim()} style={{padding:"0 22px",borderRadius:10,border:"none",background:(loading||!input.trim())?BORDER:NAV,color:WHITE,fontSize:14,fontWeight:700,cursor:(loading||!input.trim())?"default":"pointer"}}>Send</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
